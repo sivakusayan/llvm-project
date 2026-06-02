@@ -2995,10 +2995,14 @@ void CodeGenModule::ConstructAttributeList(StringRef Name,
       // informative.
       assert(!Align.isZero());
 
-      // For now, only add this when we have a byval argument.
-      // TODO: be less lazy about updating test cases.
-      if (AI.getIndirectByVal())
-        Attrs.addAlignmentAttr(Align.getQuantity());
+      // If we statically know the size, let's add the dereferenceable attribute. 
+      if (!ParamType->isReferenceType()) {
+          if (!ParamType->isIncompleteType() && ParamType->isConstantSizeType()) {
+            Attrs.addDereferenceableAttr(getMinimumObjectSize(ParamType).getQuantity());
+          }
+          Attrs.addAttribute(llvm::Attribute::NonNull);
+          Attrs.addAlignmentAttr(Align.getQuantity());
+      }
 
       // byval disables readnone and readonly.
       AddPotentialArgAccess();

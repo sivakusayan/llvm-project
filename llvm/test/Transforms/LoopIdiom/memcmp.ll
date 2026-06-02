@@ -7,6 +7,7 @@
 %arr_too_short = type { [49 x i8] }
 %arr_elements_have_padding = type { [50 x i36] }
 %arr_floats = type { [50 x float] }
+%arr_ptr = type { [50 x ptr] }
 
 define i1 @memcmp_idiom(ptr byval(%arr) align 8 %lhs, ptr byval(%arr) align 8 %rhs) {
 ; CHECK-LABEL: define i1 @memcmp_idiom(
@@ -305,10 +306,10 @@ define i1 @no_idiom_float_comparisons(ptr byval(%arr_floats) align 8 %lhs, ptr b
 ; CHECK-NEXT:    br i1 [[STOP_LOOP]], label %[[EXIT:.*]], label %[[BODY]]
 ; CHECK:       [[BODY]]:
 ; CHECK-NEXT:    [[INDVAR]] = phi i64 [ 0, %[[ENTRY]] ], [ [[INC]], %[[COND]] ]
-; CHECK-NEXT:    [[LHS_ADDR:%.*]] = getelementptr inbounds nuw i8, ptr [[LHS]], i64 [[INDVAR]]
-; CHECK-NEXT:    [[RHS_ADDR:%.*]] = getelementptr inbounds nuw i8, ptr [[RHS]], i64 [[INDVAR]]
-; CHECK-NEXT:    [[LHS_VAL:%.*]] = load float, ptr [[LHS_ADDR]], align 1
-; CHECK-NEXT:    [[RHS_VAL:%.*]] = load float, ptr [[RHS_ADDR]], align 1
+; CHECK-NEXT:    [[LHS_ADDR:%.*]] = getelementptr inbounds nuw float, ptr [[LHS]], i64 [[INDVAR]]
+; CHECK-NEXT:    [[RHS_ADDR:%.*]] = getelementptr inbounds nuw float, ptr [[RHS]], i64 [[INDVAR]]
+; CHECK-NEXT:    [[LHS_VAL:%.*]] = load float, ptr [[LHS_ADDR]], align 4
+; CHECK-NEXT:    [[RHS_VAL:%.*]] = load float, ptr [[RHS_ADDR]], align 4
 ; CHECK-NEXT:    [[EQUAL:%.*]] = fcmp oeq float [[LHS_VAL]], [[RHS_VAL]]
 ; CHECK-NEXT:    br i1 [[EQUAL]], label %[[COND]], label %[[EXIT]]
 ; CHECK:       [[EXIT]]:
@@ -323,10 +324,10 @@ cond:
   br i1 %stop_loop, label %exit, label %body
 body:
   %indvar = phi i64 [ 0, %entry ], [ %inc, %cond ]
-  %lhs_addr = getelementptr inbounds nuw i8, ptr %lhs, i64 %indvar
-  %rhs_addr = getelementptr inbounds nuw i8, ptr %rhs, i64 %indvar
-  %lhs_val = load float, ptr %lhs_addr, align 1
-  %rhs_val = load float, ptr %rhs_addr, align 1
+  %lhs_addr = getelementptr inbounds nuw float, ptr %lhs, i64 %indvar
+  %rhs_addr = getelementptr inbounds nuw float, ptr %rhs, i64 %indvar
+  %lhs_val = load float, ptr %lhs_addr
+  %rhs_val = load float, ptr %rhs_addr
   %equal = fcmp oeq float %lhs_val, %rhs_val
   br i1 %equal, label %cond, label %exit
 exit:
@@ -412,6 +413,47 @@ body:
   %lhs_val = load i8, ptr %lhs_addr, align 1
   %rhs_val = load i8, ptr %rhs_addr, align 1
   %equal = icmp eq i8 %lhs_val, %rhs_val
+  br i1 %equal, label %cond, label %exit
+exit:
+  %ret = phi i1 [ %equal, %body ], [ %equal, %cond ]
+  ret i1 %ret
+}
+
+define i1 @memcmp_idiom_ptr_comparisons(ptr byval(%arr_ptr) align 8 %lhs, ptr byval(%arr_ptr) align 8 %rhs) {
+; CHECK-LABEL: define i1 @memcmp_idiom_ptr_comparisons(
+; CHECK-SAME: ptr byval([[ARR_PTR:%.*]]) align 8 [[LHS:%.*]], ptr byval([[ARR_PTR]]) align 8 [[RHS:%.*]]) {
+; CHECK-NEXT:  [[ENTRY:.*]]:
+; CHECK-NEXT:    br label %[[BODY:.*]]
+; CHECK:       [[COND:.*]]:
+; CHECK-NEXT:    [[INC:%.*]] = add nuw nsw i64 [[INDVAR:%.*]], 1
+; CHECK-NEXT:    [[STOP_LOOP:%.*]] = icmp eq i64 [[INC]], 50
+; CHECK-NEXT:    br i1 [[STOP_LOOP]], label %[[EXIT:.*]], label %[[BODY]]
+; CHECK:       [[BODY]]:
+; CHECK-NEXT:    [[INDVAR]] = phi i64 [ 0, %[[ENTRY]] ], [ [[INC]], %[[COND]] ]
+; CHECK-NEXT:    [[LHS_ADDR:%.*]] = getelementptr inbounds nuw ptr, ptr [[LHS]], i64 [[INDVAR]]
+; CHECK-NEXT:    [[RHS_ADDR:%.*]] = getelementptr inbounds nuw ptr, ptr [[RHS]], i64 [[INDVAR]]
+; CHECK-NEXT:    [[LHS_VAL:%.*]] = load ptr, ptr [[LHS_ADDR]], align 8
+; CHECK-NEXT:    [[RHS_VAL:%.*]] = load ptr, ptr [[RHS_ADDR]], align 8
+; CHECK-NEXT:    [[EQUAL:%.*]] = icmp eq ptr [[LHS_VAL]], [[RHS_VAL]]
+; CHECK-NEXT:    br i1 [[EQUAL]], label %[[COND]], label %[[EXIT]]
+; CHECK:       [[EXIT]]:
+; CHECK-NEXT:    [[MEMCMP:%.*]] = call i32 @memcmp(ptr [[LHS]], ptr [[RHS]], i64 400)
+; CHECK-NEXT:    [[RET:%.*]] = icmp eq i32 [[MEMCMP]], 0
+; CHECK-NEXT:    ret i1 [[RET]]
+;
+entry:
+  br label %body
+cond:
+  %inc = add nuw nsw i64 %indvar, 1
+  %stop_loop = icmp eq i64 %inc, 50
+  br i1 %stop_loop, label %exit, label %body
+body:
+  %indvar = phi i64 [ 0, %entry ], [ %inc, %cond ]
+  %lhs_addr = getelementptr inbounds nuw ptr, ptr %lhs, i64 %indvar
+  %rhs_addr = getelementptr inbounds nuw ptr, ptr %rhs, i64 %indvar
+  %lhs_val = load ptr, ptr %lhs_addr
+  %rhs_val = load ptr, ptr %rhs_addr
+  %equal = icmp eq ptr %lhs_val, %rhs_val
   br i1 %equal, label %cond, label %exit
 exit:
   %ret = phi i1 [ %equal, %body ], [ %equal, %cond ]

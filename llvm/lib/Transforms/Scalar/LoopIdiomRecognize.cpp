@@ -3636,16 +3636,30 @@ static const std::optional<StrideAccessPattern>
 isLoadMemcmpCandidate(LoadInst *LI, Loop *CurLoop, const DataLayout *DL,
                       ScalarEvolution *SE, DominatorTree *DT,
                       AssumptionCache *AC) {
-  if (!LI->isSimple())
+  if (!LI->isSimple()) {
+  LLVM_DEBUG(dbgs() << DEBUG_TYPE << " Failed memcmp due to not simple "
+                    << dyn_cast<Instruction>(LI)->getParent()->getParent()->getName()
+                    << "\n");
+
     return std::nullopt;
+  }
 
   Value *LoadPointer = LI->getPointerOperand();
-  if (LoadPointer->getType()->getPointerAddressSpace() != 0)
+  if (LoadPointer->getType()->getPointerAddressSpace() != 0) {
+  LLVM_DEBUG(dbgs() << DEBUG_TYPE << " Failed memcmp due to not address space 0 "
+                    << dyn_cast<Instruction>(LI)->getParent()->getParent()->getName()
+                    << "\n");
+
     return std::nullopt;
+  }
 
   Type *Ty = LI->getType();
-  if (!isByteComparable(Ty, DL))
+  if (!isByteComparable(Ty, DL)) {
+  LLVM_DEBUG(dbgs() << DEBUG_TYPE << " Failed memcmp due to not byte comparable"
+                    << dyn_cast<Instruction>(LI)->getParent()->getParent()->getName()
+                    << "\n");
     return std::nullopt;
+  }
 
   // If the Load SCEV has a non-constant step, it is clearly not part of a
   // `memcmp` idiom. Furthermore, the step must be equal to the size of
@@ -3656,20 +3670,34 @@ isLoadMemcmpCandidate(LoadInst *LI, Loop *CurLoop, const DataLayout *DL,
   const APInt *LoadStep;
   if (!match(LoadSCEV, m_scev_AffineAddRec(m_SCEVUnknown(LoadBase),
                                            m_scev_APInt(LoadStep)))) {
+  LLVM_DEBUG(dbgs() << DEBUG_TYPE << " Failed memcmp due to SCEV "
+                    << dyn_cast<Instruction>(LI)->getParent()->getParent()->getName()
+                    << "\n");
+
     return std::nullopt;
   }
   if (DL->getTypeSizeInBits(Ty) != *LoadStep * CHAR_BIT)
     return std::nullopt;
 
   // TODO: Possibly handle negative strides.
-  if (LoadStep->isNegative())
+  if (LoadStep->isNegative()) {
+  LLVM_DEBUG(dbgs() << DEBUG_TYPE << " Failed memcmp due to negative stride"
+                    << dyn_cast<Instruction>(LI)->getParent()->getParent()->getName()
+                    << "\n");
     return std::nullopt;
+  }
 
   // If it's possible for the load to go out of bounds, then this certainly
   // can't be transformed. The buffers passed into memcmp must both be at
   // least as large as the size argument passed into it.
   if (!llvm::isDereferenceableAndAlignedInLoop(LI, CurLoop, *SE, *DT, AC))
+  {
+  LLVM_DEBUG(dbgs() << DEBUG_TYPE << " Failed memcmp due to not provably dereferenceable"
+                    << dyn_cast<Instruction>(LI)->getParent()->getParent()->getName()
+                    << "\n");
+
     return std::nullopt;
+  }
 
   assert(LoadBase);
   assert(LoadStep);
@@ -3737,12 +3765,19 @@ LoopIdiomRecognize::recognizeMemcmp() {
   // a compare operation, and that the branch operation looks correct.
   using namespace PatternMatch;
   const auto *CI = dyn_cast<CmpInst>(Val);
-  if (!CI)
+  if (!CI) {
+  LLVM_DEBUG(dbgs() << DEBUG_TYPE << " Failed memcmp due to not condition not being a compare"
+                    << BodyBlock->getParent()->getName()
+                    << "\n");
     return std::nullopt;
+  }
 
   const auto *BodyTerminator = dyn_cast<CondBrInst>(BodyBlock->getTerminator());
   if (!match(BodyTerminator, m_Br(m_Specific(CI), m_SpecificBB(CondBlock),
                                   m_SpecificBB(ExitBlock)))) {
+  LLVM_DEBUG(dbgs() << DEBUG_TYPE << " Failed memcmp due to unmatched terminator pattern"
+                    << BodyBlock->getParent()->getName()
+                    << "\n");
     return std::nullopt;
   }
 
@@ -3751,8 +3786,12 @@ LoopIdiomRecognize::recognizeMemcmp() {
   // `isLoadMemcmpCandidate()` for more information.
   auto *LoadLHS = dyn_cast<LoadInst>(CI->getOperand(0));
   auto *LoadRHS = dyn_cast<LoadInst>(CI->getOperand(1));
-  if (!LoadLHS || !LoadRHS)
+  if (!LoadLHS || !LoadRHS) {
+  LLVM_DEBUG(dbgs() << DEBUG_TYPE << " Failed memcmp due to not comparing two loads"
+                    << BodyBlock->getParent()->getName()
+                    << "\n");
     return std::nullopt;
+  }
 
   const std::optional<StrideAccessPattern> PatternLHS =
       isLoadMemcmpCandidate(LoadLHS, CurLoop, DL, SE, DT, AC);
@@ -3802,8 +3841,11 @@ bool LoopIdiomRecognize::recognizeAndInsertMemcmp() {
     return false;
 
   const std::optional<RecognizeMemcmpResult> Result = recognizeMemcmp();
-  if (!Result.has_value())
+  if (!Result.has_value()) {
+        LLVM_DEBUG(dbgs() << DEBUG_TYPE
+               " memcmp idiom detection failed.\n");
     return false;
+  }
 
   insertMemcmp(Result.value());
   return true;
@@ -3840,8 +3882,8 @@ void LoopIdiomRecognize::insertMemcmp(RecognizeMemcmpResult Result) {
   // Okay, our work should be done. We'll let the loop-deletion pass
   // handle cleaning up the dead loop.
   ++NumMemCmp;
-  LLVM_DEBUG(dbgs() << "Formed memcmp idiom:" << *MemCmpCall << " in function "
-                    << Result.LCSSAPhi->getParent()->getParent()->getName()
+  LLVM_DEBUG(dbgs() << DEBUG_TYPE << " Formed memcmp idiom:" << *MemCmpCall << " in function "
+                    << dyn_cast<Instruction>(NewCmpInst)->getParent()->getParent()->getName()
                     << "\n");
   ORE.emit([&]() {
     return OptimizationRemark(DEBUG_TYPE, "recognizeAndInsertMemcmp",
@@ -3850,4 +3892,5 @@ void LoopIdiomRecognize::insertMemcmp(RecognizeMemcmpResult Result) {
            << "Transformed memcmp loop idiom";
   });
   ExpCleaner.markResultUsed();
+  return;
 }

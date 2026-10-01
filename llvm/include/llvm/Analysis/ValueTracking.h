@@ -136,6 +136,11 @@ LLVM_ABI bool haveNoCommonBitsSet(const WithCache<const Value *> &LHSCache,
                                   const WithCache<const Value *> &RHSCache,
                                   const SimplifyQuery &SQ);
 
+/// Return true if the first `Length` bits of LHS and RHS can be proved to be
+/// the same.
+LLVM_ABI bool haveCommonInitialBits(const Value *LHS, const Value *RHS,
+                                    unsigned Length, const SimplifyQuery &SQ);
+
 /// Return true if the given value is known to have exactly one bit set when
 /// defined. For vectors return true if every element is known to be a power
 /// of two when defined. Supports values with integer or pointer type and

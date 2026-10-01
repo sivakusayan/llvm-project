@@ -565,8 +565,10 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
         return MemDepResult::getDef(Inst);
       if (isInvariantLoad)
         continue;
-      if (isStorePreservingMemoryLocation(SI, MemLoc, MemLocAlign, BatchAA,
-                                          *Limit))
+      if (isStorePreservingMemoryLocation(
+              SI, MemLoc, MemLocAlign, BatchAA,
+              SimplifyQuery(Inst->getDataLayout(), &SI->getParent()->front()),
+              *Limit))
         continue;
       return MemDepResult::getClobber(Inst);
     }

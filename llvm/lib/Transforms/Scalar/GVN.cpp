@@ -2453,8 +2453,11 @@ std::optional<GVNPass::ReachingMemVal> GVNPass::accessMayModifyLocation(
     // A store that writes back a value already at the memory location leaves
     // the latter unchanged.
     if (auto *SI = dyn_cast<StoreInst>(ClobberI))
-      if (isStorePreservingMemoryLocation(SI, Loc, LoadAlign, AA,
-                                          MaxNumInsnsPerBlock))
+      if (isStorePreservingMemoryLocation(
+              SI, Loc, LoadAlign, AA,
+              SimplifyQuery(SI->getDataLayout(), DT, AC,
+                            &SI->getParent()->front()),
+              MaxNumInsnsPerBlock))
         return std::nullopt;
 
     if (AR == AliasResult::MayAlias ||

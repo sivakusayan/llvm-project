@@ -277,6 +277,17 @@ bool llvm::haveNoCommonBitsSet(const WithCache<const Value *> &LHSCache,
   return Result == NoCommonBitsSetResult::Known;
 }
 
+bool llvm::haveCommonInitialBits(const Value *LHS, const Value *RHS,
+                                 unsigned Length, const SimplifyQuery &SQ) {
+
+  if (match(RHS, m_ZExtOrSExt(m_Specific(LHS))))
+    return true;
+  if (match(RHS, m_NNegZExt(m_Specific(LHS))))
+    return isKnownNonZero(LHS, SQ);
+
+  return false;
+}
+
 bool llvm::isOnlyUsedInZeroComparison(const Instruction *I) {
   return !I->user_empty() &&
          all_of(I->users(), match_fn(m_ICmp(m_Value(), m_Zero())));

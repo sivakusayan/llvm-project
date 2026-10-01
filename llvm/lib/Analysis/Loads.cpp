@@ -24,6 +24,7 @@
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/Support/MathExtras.h"
 
 using namespace llvm;
 
@@ -840,26 +841,60 @@ Value *llvm::FindAvailableLoadedValue(LoadInst *Load, BatchAAResults &AA,
   return Available;
 }
 
-bool llvm::isStorePreservingMemoryLocation(const StoreInst *SI,
-                                           const MemoryLocation &MemLoc,
-                                           Align MemLocAlign,
-                                           BatchAAResults &AA,
-                                           unsigned ScanLimit) {
+bool llvm::isStorePreservingMemoryLocation(
+    const StoreInst *SI, const MemoryLocation &MemLoc, Align MemLocAlign,
+    BatchAAResults &AA, const SimplifyQuery &SQ, unsigned ScanLimit) {
   // Ensure no partial overlap is possible, and that the stored value is the
   // current content of MemLoc.
   if (!MemLoc.Size.hasValue() || MemLoc.Size.isScalable())
-    return false;
-  if (MemoryLocation::get(SI).Size != MemLoc.Size)
     return false;
   if (std::min(MemLocAlign, SI->getAlign()).value() <
       MemLoc.Size.getValue().getFixedValue())
     return false;
 
-  auto *LI = dyn_cast<LoadInst>(SI->getValueOperand());
-  if (!LI || LI->getParent() != SI->getParent())
+  // First, find a load that allows us to reason about the memory location's
+  // contents
+  auto IsDominatingLoadForMemLoc = [SI, MemLoc,
+                                    &AA](const llvm::Instruction &I) {
+    const LoadInst *LI = dyn_cast<LoadInst>(&I);
+    return LI && LI->comesBefore(SI) &&
+           AA.alias(MemoryLocation::get(LI), MemLoc) == AliasResult::MustAlias;
+  };
+  const BasicBlock *BB = SI->getParent();
+  auto *LI = dyn_cast<LoadInst>(llvm::find_if(*BB, IsDominatingLoadForMemLoc));
+  if (!LI)
     return false;
-  if (AA.alias(MemoryLocation::get(LI), MemLoc) != AliasResult::MustAlias)
+
+  // Check to see if an overlap implies that the store and load start at the
+  // same base.
+  const DataLayout &DL = SI->getDataLayout();
+  unsigned StoreAlign = SI->getAlign().value();
+  unsigned LoadAlign = LI->getAlign().value();
+  TypeSize StoreSize = DL.getTypeStoreSize(SI->getAccessType());
+  TypeSize LoadSize = DL.getTypeStoreSize(LI->getAccessType());
+
+  if (StoreSize.isScalable() || LoadSize.isScalable())
     return false;
+  if (StoreSize > StoreAlign || LoadSize > LoadAlign)
+    return false;
+  if (StoreSize < LoadSize)
+    return false;
+
+  // We want to show that any partial overlap forces the store and load to start
+  // at the same location. It's sufficient to check that the load's align is at
+  // least as large as the store's align. For example, suppose we have a partial
+  // overlap where the store starts before the load. Since the store's alignment
+  // is larger than the store's size, that means the store can't overwrite any
+  // bits of the load. A symmetric argument shows what happens if the store is
+  // after the load, and we are done.
+  if (LoadAlign < StoreAlign)
+    return false;
+
+  // Now, check if the store is a superset of the loaded bits.
+  if (!haveCommonInitialBits(LI, SI->getValueOperand(), MemLoc.Size.getValue(),
+                             SQ)) {
+    return false;
+  }
 
   // No memory operation in between may modify MemLoc.
   unsigned NumVisited = 0;

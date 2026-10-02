@@ -47,6 +47,14 @@ static Instruction &findInstructionByName(Function *F, StringRef Name) {
   llvm_unreachable("Expected value not found");
 }
 
+static Value &findArgumentByName(Function *F, StringRef Name) {
+  for (Value &V : F->args())
+    if (V.getName() == Name)
+      return V;
+
+  llvm_unreachable("Expected argument not found");
+}
+
 class ValueTrackingTest : public testing::Test {
 protected:
   std::unique_ptr<Module> parseModule(StringRef Assembly) {
@@ -967,6 +975,35 @@ TEST_F(ValueTrackingTest, impliesPoison_Select_CondLogic) {
   // deep enough.
   EXPECT_FALSE(impliesPoison(A2, A4));
   EXPECT_FALSE(impliesPoison(A3, A4));
+}
+
+TEST_F(ValueTrackingTest, impliesPoison_ZExt_NNeg) {
+    auto M = parseModule(R"(
+  declare void @llvm.assume(i1)
+
+  define i64 @test(i32 %X, i32 %Y) {
+    %res = icmp sge i32 %X, 0
+    call void @llvm.assume(i1 %res)
+
+    %ExtendX = zext nneg i32 %X to i64
+    %ExtendY = zext nneg i32 %Y to i64
+    ret i64 %ExtendX 
+  })");
+    auto *F = M->getFunction("test");
+    auto *X = &findArgumentByName(F, "X");
+    auto *Y = &findArgumentByName(F, "Y");
+    auto *ExtendX = &findInstructionByName(F, "ExtendX");
+    auto *ExtendY = &findInstructionByName(F, "ExtendY");
+    AssumptionCache AC(*F);
+    SimplifyQuery SQ(M->getDataLayout(), /*DT=*/nullptr, &AC, /*CtxI=*/ExtendY);
+
+    // Since X is provably non-negative, ExtendX is never poison, so
+    // impliesPoison(ExtendX, X) is vacuously true.
+    EXPECT_TRUE(impliesPoison(ExtendX, X, SQ));
+
+    // On the other hand, ExtendY being poison could just mean that
+    // Y was negative.
+    EXPECT_FALSE(impliesPoison(ExtendY, Y, SQ));
 }
 
 TEST_F(ValueTrackingTest, ComputeNumSignBits_Shuffle_Pointers) {

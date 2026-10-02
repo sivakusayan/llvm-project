@@ -820,7 +820,7 @@ LLVM_ABI bool canCreatePoison(const Operator *Op,
 /// Return true if V is poison given that ValAssumedPoison is already poison.
 /// For example, if ValAssumedPoison is `icmp X, 10` and V is `icmp X, 5`,
 /// impliesPoison returns true.
-LLVM_ABI bool impliesPoison(const Value *ValAssumedPoison, const Value *V);
+LLVM_ABI bool impliesPoison(const Value *ValAssumedPoison, const Value *V, const SimplifyQuery &SQ = {{}});
 
 /// Return true if this function can prove that V does not have undef bits
 /// and is never poison. If V is an aggregate value or vector, check whether

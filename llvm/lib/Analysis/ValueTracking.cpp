@@ -8125,7 +8125,7 @@ static bool directlyImpliesPoison(const Value *ValAssumedPoison, const Value *V,
 }
 
 static bool impliesPoison(const Value *ValAssumedPoison, const Value *V,
-                          unsigned Depth) {
+                          unsigned Depth, const SimplifyQuery &SQ) {
   if (isGuaranteedNotToBePoison(ValAssumedPoison))
     return true;
 
@@ -8139,14 +8139,14 @@ static bool impliesPoison(const Value *ValAssumedPoison, const Value *V,
   const auto *I = dyn_cast<Instruction>(ValAssumedPoison);
   if (I && !canCreatePoison(cast<Operator>(I))) {
     return all_of(I->operands(), [=](const Value *Op) {
-      return impliesPoison(Op, V, Depth + 1);
+      return impliesPoison(Op, V, Depth + 1, SQ);
     });
   }
   return false;
 }
 
-bool llvm::impliesPoison(const Value *ValAssumedPoison, const Value *V) {
-  return ::impliesPoison(ValAssumedPoison, V, /* Depth */ 0);
+bool llvm::impliesPoison(const Value *ValAssumedPoison, const Value *V, const SimplifyQuery &SQ) {
+  return ::impliesPoison(ValAssumedPoison, V, /* Depth */ 0, SQ);
 }
 
 static bool programUndefinedIfUndefOrPoison(const Value *V, bool PoisonOnly);
